@@ -1,0 +1,30 @@
+{
+  "controller": "C0",
+  "model": "google/flan-t5-base",
+  "num_examples": 60,
+  "summary": {
+    "easy": {
+      "num_examples": 20,
+      "exact_match": 0.6,
+      "f1": 0.6,
+      "average_latency_seconds": 0.22683468095000875,
+      "average_output_tokens": 5.2
+    },
+    "multi_hop": {
+      "num_examples": 20,
+      "exact_match": 0.25,
+      "f1": 0.4878571428571429,
+      "average_latency_seconds": 0.1619419591499991,
+      "average_output_tokens": 5.1
+    },
+    "unanswerable": {
+      "num_examples": 20,
+      "exact_match": 0.05,
+      "f1": 0.15833333333333333,
+      "average_latency_seconds": 0.1797487245999946,
+      "average_output_tokens": 5.7
+    }
+  },
+  "action_accuracy": 0.3333333333333333,
+  "unanswerable_false_answer_rate": 1.0
+}

@@ -1,0 +1,4 @@
+Controller,Easy EM (%),Easy F1 (%),Multi-hop EM (%),Multi-hop F1 (%),Unanswerable EM (%),Unanswerable F1 (%),Action Accuracy (%),Unanswerable False-Answer (%)
+C0: Always Answer,60.0,60.0,25.0,48.785714285714285,5.0,15.833333333333332,33.33333333333333,100.0
+C1: Action Prompt,60.0,60.0,30.0,53.78571428571429,5.0,15.833333333333332,33.33333333333333,100.0
+C2: Sufficiency Checklist,60.0,60.0,25.0,48.785714285714285,5.0,15.833333333333332,35.0,100.0
