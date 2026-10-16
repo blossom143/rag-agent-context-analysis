@@ -1,0 +1,65 @@
+{
+  "controller": "C2",
+  "model": "google/flan-t5-base",
+  "input_path": "results/c2_results_v2.json",
+  "num_examples": 60,
+  "summary": {
+    "easy": {
+      "num_examples": 20,
+      "num_answered": 18,
+      "answer_coverage": 0.9,
+      "exact_match": 0.6,
+      "f1": 0.6,
+      "action_accuracy": 0.9,
+      "invalid_output_rate": 0.1,
+      "decision_context_truncated_rate": 0.9,
+      "average_decision_input_tokens": 446.05,
+      "average_latency_seconds": 0.3524957142000062,
+      "average_retrieval_calls": 1.0
+    },
+    "multi_hop": {
+      "num_examples": 20,
+      "num_answered": 16,
+      "answer_coverage": 0.8,
+      "exact_match": 0.2,
+      "f1": 0.4378571428571429,
+      "action_accuracy": 0.0,
+      "invalid_output_rate": 0.2,
+      "decision_context_truncated_rate": 0.95,
+      "average_decision_input_tokens": 437.25,
+      "average_latency_seconds": 0.2936907886000199,
+      "average_retrieval_calls": 1.0
+    },
+    "unanswerable": {
+      "num_examples": 20,
+      "num_answered": 15,
+      "answer_coverage": 0.75,
+      "exact_match": 0.0,
+      "f1": 0.075,
+      "action_accuracy": 0.0,
+      "invalid_output_rate": 0.25,
+      "decision_context_truncated_rate": 1.0,
+      "average_decision_input_tokens": 388.2,
+      "average_latency_seconds": 0.32096630630002776,
+      "average_retrieval_calls": 1.0
+    }
+  },
+  "overall": {
+    "num_examples": 60,
+    "num_answered": 49,
+    "answer_coverage": 0.8166666666666667,
+    "exact_match": 0.26666666666666666,
+    "f1": 0.3709523809523809,
+    "action_accuracy": 0.3,
+    "invalid_output_rate": 0.18333333333333332,
+    "decision_context_truncated_rate": 0.95,
+    "average_decision_input_tokens": 423.8333333333333,
+    "average_latency_seconds": 0.322384269700018,
+    "average_retrieval_calls": 1.0
+  },
+  "action_accuracy": 0.3,
+  "invalid_output_rate": 0.18333333333333332,
+  "unanswerable_false_answer_rate": 0.75,
+  "multi_hop_search_rate": 0.0,
+  "easy_search_rate": 0.0
+}
