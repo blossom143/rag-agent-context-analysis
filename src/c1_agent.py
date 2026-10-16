@@ -1,21 +1,26 @@
 
+import argparse
 import json
 import time
+from functools import partial
 from pathlib import Path
 
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
+from actions import execution_action, parse_action
+from prompt_budget import MAX_INPUT_TOKENS, encode_prompt, fit_prompt
 from retriever import DenseRetriever
+from smoke import select_smoke_examples
 
 
 BENCHMARK_PATH = Path("data/benchmark_60.json")
-OUTPUT_PATH = Path("results/c1_results.json")
+OUTPUT_PATH = Path("results/c1_results_v2.json")
+SMOKE_OUTPUT_PATH = Path("results/smoke/c1_results_v2.json")
 
 MODEL_NAME = "google/flan-t5-base"
 
 TOP_K = 5
-MAX_INPUT_LENGTH = 1024
 MAX_DECISION_TOKENS = 16
 MAX_ANSWER_TOKENS = 64
 
@@ -78,12 +83,7 @@ def generate_text(
     device,
     max_new_tokens,
 ):
-    inputs = tokenizer(
-        prompt,
-        return_tensors="pt",
-        truncation=True,
-        max_length=MAX_INPUT_LENGTH,
-    )
+    inputs = encode_prompt(tokenizer, prompt, MAX_INPUT_TOKENS)
 
     inputs = {
         key: value.to(device)
@@ -103,27 +103,44 @@ def generate_text(
     ).strip()
 
 
-def parse_action(text):
-    text = text.upper().strip()
+def fit_and_generate(
+    build_prompt,
+    documents,
+    tokenizer,
+    model,
+    device,
+    max_new_tokens,
+):
+    fitted = fit_prompt(
+        tokenizer,
+        build_prompt,
+        build_context,
+        documents,
+        MAX_INPUT_TOKENS,
+    )
 
-    # Prefer exact first-token decisions.
-    first_word = text.split()[0] if text.split() else ""
+    text = generate_text(
+        fitted["prompt"],
+        tokenizer,
+        model,
+        device,
+        max_new_tokens,
+    )
 
-    if first_word in {"ANSWER", "SEARCH", "ABSTAIN"}:
-        return first_word
+    return text, fitted
 
-    # Fallback if the model produces extra text.
-    if "ABSTAIN" in text:
-        return "ABSTAIN"
 
-    if "SEARCH" in text:
-        return "SEARCH"
+def prompt_stats(fitted):
+    if fitted is None:
+        return None
 
-    if "ANSWER" in text:
-        return "ANSWER"
-
-    # Conservative default.
-    return "ANSWER"
+    return {
+        "input_tokens": fitted["input_tokens"],
+        "context_truncated": fitted["context_truncated"],
+        "documents_retrieved": fitted["documents_retrieved"],
+        "documents_in_prompt": fitted["documents_in_prompt"],
+        "titles_in_prompt": fitted["titles_in_prompt"],
+    }
 
 
 def load_model():
@@ -169,26 +186,21 @@ def evaluate_example(
         top_k=TOP_K,
     )
 
-    first_context = build_context(first_results)
-
     # =========================================================
     # STEP 2: Decide what to do
     # =========================================================
 
-    decision_prompt = build_decision_prompt(
-        question,
-        first_context,
-    )
-
-    decision_text = generate_text(
-        decision_prompt,
+    decision_text, decision_fit = fit_and_generate(
+        partial(build_decision_prompt, question),
+        first_results,
         tokenizer,
         model,
         device,
         MAX_DECISION_TOKENS,
     )
 
-    first_action = parse_action(decision_text)
+    parsed_action = parse_action(decision_text)
+    executed_action = execution_action(parsed_action)
 
     # =========================================================
     # STEP 3: Execute the decision
@@ -197,17 +209,14 @@ def evaluate_example(
     retrieval_calls = 1
 
     second_results = []
+    answer_fit = None
 
-    if first_action == "ANSWER":
+    if executed_action == "ANSWER":
 
         # Answer using the initial retrieved context.
-        answer_prompt = build_answer_prompt(
-            question,
-            first_context,
-        )
-
-        answer = generate_text(
-            answer_prompt,
+        answer, answer_fit = fit_and_generate(
+            partial(build_answer_prompt, question),
+            first_results,
             tokenizer,
             model,
             device,
@@ -216,7 +225,7 @@ def evaluate_example(
 
         final_action = "ANSWER"
 
-    elif first_action == "SEARCH":
+    elif executed_action == "SEARCH":
 
         # Search the full candidate pool.
         retrieval_calls += 1
@@ -239,16 +248,10 @@ def evaluate_example(
                 combined_documents.append(doc)
                 seen_titles.add(doc["title"])
 
-        final_context = build_context(combined_documents)
-
         # Answer after the second search.
-        answer_prompt = build_answer_prompt(
-            question,
-            final_context,
-        )
-
-        answer = generate_text(
-            answer_prompt,
+        answer, answer_fit = fit_and_generate(
+            partial(build_answer_prompt, question),
+            combined_documents,
             tokenizer,
             model,
             device,
@@ -258,7 +261,7 @@ def evaluate_example(
         final_action = "ANSWER"
 
     else:
-        # ABSTAIN means no answer is generated.
+        # ABSTAIN (or the INVALID fallback) means no answer is generated.
         answer = ""
         final_action = "ABSTAIN"
 
@@ -272,10 +275,15 @@ def evaluate_example(
         "gold_answer": example["answer"],
         "gold_action": example["gold_action"],
 
-        "first_action": first_action,
+        # first_action is the parsed model decision and may be INVALID.
+        "decision_text": decision_text,
+        "parsed_action": parsed_action,
+        "first_action": parsed_action,
+        "execution_action": executed_action,
         "final_action": final_action,
 
-        "decision_text": decision_text,
+        "decision_prompt": prompt_stats(decision_fit),
+        "answer_prompt": prompt_stats(answer_fit),
 
         "answer": answer,
 
@@ -297,8 +305,22 @@ def evaluate_example(
 
 def main():
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Run one example per condition and write to results/smoke/.",
+    )
+    args = parser.parse_args()
+
     with open(BENCHMARK_PATH, "r") as f:
         benchmark = json.load(f)
+
+    output_path = OUTPUT_PATH
+
+    if args.smoke:
+        benchmark = select_smoke_examples(benchmark)
+        output_path = SMOKE_OUTPUT_PATH
 
     tokenizer, model, device = load_model()
 
@@ -326,17 +348,19 @@ def main():
         print(
             f"[{i:02d}/{len(benchmark)}] "
             f"{example['condition']:<12} "
-            f"decision={result['first_action']:<8} "
+            f"decision={result['parsed_action']:<8} "
+            f"raw={result['decision_text'][:20]!r} "
             f"calls={result['retrieval_calls']} "
+            f"tok={result['decision_prompt']['input_tokens']} "
             f"answer={result['answer'][:60]!r}"
         )
 
-    OUTPUT_PATH.parent.mkdir(
+    output_path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    with open(OUTPUT_PATH, "w") as f:
+    with open(output_path, "w") as f:
         json.dump(
             results,
             f,
@@ -345,7 +369,7 @@ def main():
 
     print()
     print("=" * 70)
-    print(f"Saved C1 results to: {OUTPUT_PATH}")
+    print(f"Saved C1 results to: {output_path}")
     print("=" * 70)
 
 

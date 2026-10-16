@@ -1,16 +1,22 @@
 
+import argparse
 import json
 import time
+from functools import partial
 from pathlib import Path
 
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
-INPUT_PATH = Path("results/c0_results.json")
-OUTPUT_PATH = Path("results/c0_answers.json")
+from baseline_c0 import build_context
+from prompt_budget import MAX_INPUT_TOKENS, encode_prompt, fit_prompt
+
+INPUT_PATH = Path("results/c0_results_v2.json")
+OUTPUT_PATH = Path("results/c0_answers_v2.json")
+SMOKE_INPUT_PATH = Path("results/smoke/c0_results_v2.json")
+SMOKE_OUTPUT_PATH = Path("results/smoke/c0_answers_v2.json")
 
 MODEL_NAME = "google/flan-t5-base"
-MAX_INPUT_LENGTH = 1024
 MAX_NEW_TOKENS = 64
 
 
@@ -45,15 +51,16 @@ def load_model():
     return tokenizer, model, device
 
 
-def generate_answer(question, context, tokenizer, model, device):
-    prompt = build_prompt(question, context)
-
-    inputs = tokenizer(
-        prompt,
-        return_tensors="pt",
-        truncation=True,
-        max_length=MAX_INPUT_LENGTH,
+def generate_answer(question, documents, tokenizer, model, device):
+    fitted = fit_prompt(
+        tokenizer,
+        partial(build_prompt, question),
+        build_context,
+        documents,
+        MAX_INPUT_TOKENS,
     )
+
+    inputs = encode_prompt(tokenizer, fitted["prompt"], MAX_INPUT_TOKENS)
 
     inputs = {
         key: value.to(device)
@@ -84,12 +91,32 @@ def generate_answer(question, context, tokenizer, model, device):
         "answer": answer,
         "input_tokens": int(input_token_count),
         "output_tokens": int(output_token_count),
+        "context_truncated": fitted["context_truncated"],
+        "documents_in_prompt": fitted["documents_in_prompt"],
+        "titles_in_prompt": fitted["titles_in_prompt"],
         "latency_seconds": latency,
     }
 
 
 def main():
-    with open(INPUT_PATH, "r") as f:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Read and write the one-per-condition files in results/smoke/.",
+    )
+    args = parser.parse_args()
+
+    input_path = SMOKE_INPUT_PATH if args.smoke else INPUT_PATH
+    output_path = SMOKE_OUTPUT_PATH if args.smoke else OUTPUT_PATH
+
+    if not input_path.exists():
+        raise FileNotFoundError(
+            f"{input_path} not found. Run baseline_c0.py"
+            f"{' --smoke' if args.smoke else ''} first."
+        )
+
+    with open(input_path, "r") as f:
         examples = json.load(f)
 
     tokenizer, model, device = load_model()
@@ -98,14 +125,14 @@ def main():
 
     print()
     print("=" * 70)
-    print(f"Running C0 on {len(examples)} examples")
+    print(f"Running C0 on {len(examples)} examples from {input_path}")
     print("=" * 70)
 
     for i, example in enumerate(examples, start=1):
 
         generation = generate_answer(
             question=example["question"],
-            context=example["context"],
+            documents=example["retrieved_documents"],
             tokenizer=tokenizer,
             model=model,
             device=device,
@@ -122,6 +149,9 @@ def main():
             "answer": generation["answer"],
             "input_tokens": generation["input_tokens"],
             "output_tokens": generation["output_tokens"],
+            "context_truncated": generation["context_truncated"],
+            "documents_in_prompt": generation["documents_in_prompt"],
+            "titles_in_prompt": generation["titles_in_prompt"],
             "latency_seconds": generation["latency_seconds"],
         }
 
@@ -130,18 +160,19 @@ def main():
         print(
             f"[{i:02d}/{len(examples)}] "
             f"{example['condition']:<12} "
+            f"tok={generation['input_tokens']} "
             f"answer={generation['answer'][:80]!r} "
             f"time={generation['latency_seconds']:.2f}s"
         )
 
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(OUTPUT_PATH, "w") as f:
+    with open(output_path, "w") as f:
         json.dump(results, f, indent=2)
 
     print()
     print("=" * 70)
-    print(f"Saved C0 answers to: {OUTPUT_PATH}")
+    print(f"Saved C0 answers to: {output_path}")
     print("=" * 70)
 
 

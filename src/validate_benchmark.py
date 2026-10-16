@@ -1,9 +1,81 @@
 
 import json
+import sys
 from pathlib import Path
 from collections import Counter
 
 BENCHMARK_PATH = Path("data/benchmark_60.json")
+
+EXPECTED_COUNTS = {
+    "easy": 20,
+    "multi_hop": 20,
+    "unanswerable": 20,
+}
+
+REQUIRED_FIELDS = (
+    "id",
+    "question",
+    "answer",
+    "condition",
+    "gold_action",
+    "documents",
+    "initial_documents",
+    "supporting_titles",
+)
+
+REQUIRED_DOCUMENT_FIELDS = ("title", "text")
+
+
+def validate_structure(benchmark):
+    """Check fields, ids, and the condition distribution."""
+    errors = []
+
+    for index, example in enumerate(benchmark):
+        label = example.get("id", f"index {index}")
+
+        missing = [
+            field for field in REQUIRED_FIELDS
+            if field not in example
+        ]
+
+        if missing:
+            errors.append(f"{label}: missing fields {missing}")
+            continue
+
+        for field in ("id", "question", "answer"):
+            if not isinstance(example[field], str) or not example[field].strip():
+                errors.append(f"{label}: field {field!r} is empty")
+
+        for list_field in ("documents", "initial_documents"):
+            for doc_index, doc in enumerate(example[list_field]):
+                missing_doc = [
+                    field for field in REQUIRED_DOCUMENT_FIELDS
+                    if field not in doc
+                ]
+
+                if missing_doc:
+                    errors.append(
+                        f"{label}: {list_field}[{doc_index}] "
+                        f"missing fields {missing_doc}"
+                    )
+
+    ids = [example.get("id") for example in benchmark]
+    duplicates = sorted(
+        str(item) for item, count in Counter(ids).items()
+        if count > 1
+    )
+
+    if duplicates:
+        errors.append(f"duplicate ids: {duplicates}")
+
+    counts = Counter(example.get("condition") for example in benchmark)
+
+    if dict(counts) != EXPECTED_COUNTS:
+        errors.append(
+            f"condition counts {dict(counts)} != expected {EXPECTED_COUNTS}"
+        )
+
+    return errors
 
 
 def validate_example(example):
@@ -130,6 +202,25 @@ def main():
 
     if len(ids) != len(set(ids)):
         print("WARNING: Duplicate IDs found.")
+
+    print()
+    print("=" * 70)
+    print("STRUCTURE VALIDATION")
+    print("=" * 70)
+
+    structure_errors = validate_structure(benchmark)
+
+    if structure_errors:
+        print(f"FAIL: {len(structure_errors)} structural errors.")
+
+        for error in structure_errors:
+            print(f"  - {error}")
+
+        print()
+        print("FINAL VERDICT: BENCHMARK NEEDS REVISION")
+        sys.exit(1)
+
+    print("PASS: required fields present, ids unique, 20/20/20 conditions.")
 
     # Validate individual examples
     all_errors = []
@@ -273,6 +364,9 @@ def main():
         print("FINAL VERDICT: BENCHMARK NEEDS REVISION")
 
     print("=" * 70)
+
+    if all_errors:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

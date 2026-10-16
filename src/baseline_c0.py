@@ -1,12 +1,14 @@
+import argparse
 import json
 from pathlib import Path
 
 from retriever import DenseRetriever
+from smoke import select_smoke_examples
 
 
 BENCHMARK_PATH = Path("data/benchmark_60.json")
-RESULTS_DIR = Path("results")
-OUTPUT_PATH = RESULTS_DIR / "c0_results.json"
+OUTPUT_PATH = Path("results/c0_results_v2.json")
+SMOKE_OUTPUT_PATH = Path("results/smoke/c0_results_v2.json")
 
 TOP_K = 5
 
@@ -55,11 +57,22 @@ def evaluate_example(example, retriever):
             doc["title"]
             for doc in retrieved_docs
         ],
+        # Ranked documents with scores, so answer generation can fit
+        # them to the model's input limit. "context" is the untrimmed text.
+        "retrieved_documents": retrieved_docs,
         "context": context,
     }
 
 
 def main():
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Run one example per condition and write to results/smoke/.",
+    )
+    args = parser.parse_args()
 
     # ---------------------------------------------------------
     # Load benchmark
@@ -67,6 +80,12 @@ def main():
 
     with open(BENCHMARK_PATH, "r") as f:
         benchmark = json.load(f)
+
+    output_path = OUTPUT_PATH
+
+    if args.smoke:
+        benchmark = select_smoke_examples(benchmark)
+        output_path = SMOKE_OUTPUT_PATH
 
     print(f"Evaluating {len(benchmark)} examples...")
 
@@ -101,12 +120,12 @@ def main():
     # Save
     # ---------------------------------------------------------
 
-    RESULTS_DIR.mkdir(
+    output_path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    with open(OUTPUT_PATH, "w") as f:
+    with open(output_path, "w") as f:
         json.dump(
             results,
             f,
@@ -115,7 +134,7 @@ def main():
 
     print()
     print("=" * 70)
-    print(f"Saved C0 retrieval contexts to: {OUTPUT_PATH}")
+    print(f"Saved C0 retrieval contexts to: {output_path}")
     print("=" * 70)
 
 
